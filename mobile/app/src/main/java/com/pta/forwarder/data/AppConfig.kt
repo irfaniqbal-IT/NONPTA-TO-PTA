@@ -2,6 +2,7 @@ package com.pta.forwarder.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.pta.forwarder.util.SecretStore
 
 enum class DeviceRole {
     SENDER,
@@ -24,8 +25,8 @@ class AppConfig(context: Context) {
         set(value) = prefs.edit().putBoolean("telegram_enabled", value).apply()
 
     var telegramBotToken: String
-        get() = prefs.getString("telegram_bot_token", "") ?: ""
-        set(value) = prefs.edit().putString("telegram_bot_token", value).apply()
+        get() = SecretStore.decrypt(prefs.getString("telegram_bot_token", "") ?: "")
+        set(value) = prefs.edit().putString("telegram_bot_token", SecretStore.encrypt(value)).apply()
 
     var telegramChatId: String
         get() = prefs.getString("telegram_chat_id", "") ?: ""
@@ -36,16 +37,21 @@ class AppConfig(context: Context) {
         set(value) = prefs.edit().putBoolean("discord_enabled", value).apply()
 
     var discordWebhookUrl: String
-        get() = prefs.getString("discord_webhook_url", "") ?: ""
-        set(value) = prefs.edit().putString("discord_webhook_url", value).apply()
+        get() = SecretStore.decrypt(prefs.getString("discord_webhook_url", "") ?: "")
+        set(value) = prefs.edit().putString("discord_webhook_url", SecretStore.encrypt(value)).apply()
 
     var relayEnabled: Boolean
         get() = prefs.getBoolean("relay_enabled", true)
         set(value) = prefs.edit().putBoolean("relay_enabled", value).apply()
 
     var relayWsUrl: String
-        get() = prefs.getString("relay_ws_url", "") ?: ""
-        set(value) = prefs.edit().putString("relay_ws_url", value).apply()
+        get() = SecretStore.decrypt(prefs.getString("relay_ws_url", "") ?: "")
+        set(value) = prefs.edit().putString("relay_ws_url", SecretStore.encrypt(value)).apply()
+
+    /** Shared secret sent to the relay as "Authorization: Bearer <token>". Stored encrypted. */
+    var relayAuthToken: String
+        get() = SecretStore.decrypt(prefs.getString("relay_auth_token", "") ?: "")
+        set(value) = prefs.edit().putString("relay_auth_token", SecretStore.encrypt(value)).apply()
 
     var isServiceRunning: Boolean
         get() = prefs.getBoolean("service_running", false)
