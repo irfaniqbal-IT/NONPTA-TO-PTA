@@ -12,7 +12,34 @@ const { joinVoiceChannel, getVoiceConnection } = require('@discordjs/voice');
 const TelegramBot = require('node-telegram-bot-api');
 const AudioBridge = require('./audio_bridge');
 
+const fs = require('fs');
+const http = require('http');
+const https = require('https');
+const {
+  loadAuthToken,
+  safeEqual,
+  extractToken,
+  FailedAuthLimiter,
+  MessageRateLimiter,
+  validateCallPayload,
+  escapeHtml,
+  maskNumber,
+  idList
+} = require('./security');
+
 const PORT = parseInt(process.env.PORT || '8080', 10);
+// Bind to a specific interface (e.g. your LAN IP or 127.0.0.1 behind a reverse proxy).
+const BIND_HOST = (process.env.BIND_HOST || '0.0.0.0').trim();
+const AUTH_TOKEN = loadAuthToken();
+const TLS_CERT_FILE = (process.env.TLS_CERT_FILE || '').trim();
+const TLS_KEY_FILE = (process.env.TLS_KEY_FILE || '').trim();
+const MAX_PAYLOAD_BYTES = 16 * 1024;
+const HEARTBEAT_MS = 30 * 1000;
+
+// Only these Discord users / Telegram users may Answer / Reject calls.
+const DISCORD_ALLOWED_USER_IDS = idList(process.env.DISCORD_ALLOWED_USER_IDS);
+const TELEGRAM_ALLOWED_USER_IDS = idList(process.env.TELEGRAM_ALLOWED_USER_IDS);
+
 const audioBridge = new AudioBridge(
   process.env.AUDIO_SOURCE_DEVICE || 'default',
   process.env.AUDIO_SINK_DEVICE || 'default'
@@ -22,25 +49,97 @@ let phoneSocket = null;
 let activeCallInfo = null; // { number, name, startTime, discordMessageId, telegramMessageId }
 
 // ==========================================
-// 1. WEBSOCKET SERVER (Connection to Phone A)
+// 1. SECURE WEBSOCKET SERVER (Connection to Phone A)
 // ==========================================
-const wss = new WebSocketServer({ port: PORT });
-console.log(`[WebSocket] Server running on port ${PORT}`);
+const useTls = TLS_CERT_FILE && TLS_KEY_FILE;
+const httpServer = useTls
+  ? https.createServer({
+      cert: fs.readFileSync(TLS_CERT_FILE),
+      key: fs.readFileSync(TLS_KEY_FILE),
+      minVersion: 'TLSv1.2'
+    })
+  : http.createServer();
 
-wss.on('connection', (ws) => {
-  console.log('[WebSocket] Phone A connected');
+// Any plain HTTP request (port scanners, browsers) gets a bare 404 - nothing is revealed.
+httpServer.on('request', (req, res) => {
+  res.writeHead(404, { 'Content-Type': 'text/plain' });
+  res.end('Not found');
+});
+
+const authLimiter = new FailedAuthLimiter();
+
+const wss = new WebSocketServer({
+  noServer: true,
+  maxPayload: MAX_PAYLOAD_BYTES,
+  perMessageDeflate: false
+});
+
+httpServer.on('upgrade', (req, socket, head) => {
+  const ip = req.socket.remoteAddress || 'unknown';
+
+  const reject = (code, text) => {
+    socket.write(`HTTP/1.1 ${code} ${text}\r\nConnection: close\r\n\r\n`);
+    socket.destroy();
+  };
+
+  if (authLimiter.isBlocked(ip)) return reject(429, 'Too Many Requests');
+
+  if (req.url !== '/' && req.url !== '/ws') return reject(404, 'Not Found');
+
+  const token = extractToken(req);
+  if (!token || !safeEqual(token, AUTH_TOKEN)) {
+    authLimiter.recordFailure(ip);
+    console.warn(`[Security] Rejected unauthenticated connection from ${ip}`);
+    return reject(401, 'Unauthorized');
+  }
+
+  authLimiter.recordSuccess(ip);
+  wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
+});
+
+wss.on('connection', (ws, req) => {
+  const ip = req.socket.remoteAddress;
+  console.log(`[WebSocket] Phone A connected (authenticated) from ${ip}`);
+
+  // Only one phone at a time: close the previous session.
+  if (phoneSocket && phoneSocket !== ws && phoneSocket.readyState === 1) {
+    phoneSocket.close(4000, 'Replaced by new connection');
+  }
   phoneSocket = ws;
 
-  ws.on('message', (message) => {
-    try {
-      const data = JSON.parse(message.toString());
-      console.log('[WebSocket] Message from Phone A:', data);
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
 
-      if (data.type === 'CALL_STATE' && data.payload) {
-        handlePhoneCallEvent(data.payload);
-      }
+  const limiter = new MessageRateLimiter(10, 20);
+
+  ws.on('message', (message, isBinary) => {
+    if (isBinary) return ws.close(1003, 'Binary not supported');
+    if (!limiter.allow()) {
+      console.warn('[Security] Message rate limit exceeded, closing socket');
+      return ws.close(1008, 'Rate limit');
+    }
+
+    let data;
+    try {
+      data = JSON.parse(message.toString());
     } catch (err) {
-      console.error('[WebSocket] Error parsing message:', err.message);
+      console.error('[WebSocket] Invalid JSON from Phone A');
+      return;
+    }
+
+    if (data && data.type === 'REGISTER') {
+      console.log('[WebSocket] Phone A registered as', String(data.role || '').slice(0, 20));
+      return;
+    }
+
+    if (data && data.type === 'CALL_STATE') {
+      const payload = validateCallPayload(data.payload);
+      if (!payload) {
+        console.warn('[WebSocket] Dropped invalid CALL_STATE payload');
+        return;
+      }
+      console.log(`[WebSocket] CALL_STATE ${payload.eventType} ${maskNumber(payload.number)}`);
+      handlePhoneCallEvent(payload).catch((e) => console.error('[Call] Handler error:', e.message));
     }
   });
 
@@ -54,10 +153,28 @@ wss.on('connection', (ws) => {
   });
 });
 
+// Heartbeat: drop dead / half-open connections.
+const heartbeat = setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (ws.isAlive === false) return ws.terminate();
+    ws.isAlive = false;
+    ws.ping();
+  });
+}, HEARTBEAT_MS);
+wss.on('close', () => clearInterval(heartbeat));
+
+httpServer.listen(PORT, BIND_HOST, () => {
+  console.log(`[WebSocket] ${useTls ? 'Secure (wss)' : 'Plain (ws)'} server listening on ${BIND_HOST}:${PORT}`);
+  if (!useTls) {
+    console.warn('[Security] TLS is OFF. Use plain ws:// only inside your LAN/VPN. ' +
+      'For internet access set TLS_CERT_FILE/TLS_KEY_FILE or put the relay behind nginx with HTTPS.');
+  }
+});
+
 function sendToPhone(command) {
   if (phoneSocket && phoneSocket.readyState === 1) { // OPEN
     phoneSocket.send(JSON.stringify(command));
-    console.log('[WebSocket] Sent to Phone A:', command);
+    console.log('[WebSocket] Sent to Phone A:', command.action);
     return true;
   } else {
     console.warn('[WebSocket] Cannot send command: Phone A is not connected');
@@ -84,6 +201,15 @@ discordClient.on('interactionCreate', async (interaction) => {
   if (!interaction.isButton()) return;
 
   const { customId } = interaction;
+  if (!['btn_answer', 'btn_reject', 'btn_end'].includes(customId)) return;
+
+  // Only allowed users may control calls
+  if (DISCORD_ALLOWED_USER_IDS.size === 0 || !DISCORD_ALLOWED_USER_IDS.has(interaction.user.id)) {
+    console.warn(`[Security] Discord user ${interaction.user.id} is not allowed to control calls`);
+    await interaction.reply({ content: '⛔ You are not allowed to control calls.', ephemeral: true }).catch(() => {});
+    return;
+  }
+
   await interaction.deferUpdate();
 
   if (customId === 'btn_answer') {
@@ -177,13 +303,25 @@ if (isConfigured(process.env.TELEGRAM_BOT_TOKEN)) {
 
   telegramBot.on('callback_query', async (query) => {
     const action = query.data;
-    const chatId = query.message.chat.id;
-    const messageId = query.message.message_id;
+    const chatId = query.message?.chat?.id;
+    const messageId = query.message?.message_id;
+    const fromId = String(query.from?.id || '');
+
+    // Only accept button presses from the configured chat and allowed users
+    const chatOk = String(chatId) === String(process.env.TELEGRAM_CHAT_ID);
+    const userOk = TELEGRAM_ALLOWED_USER_IDS.size === 0
+      ? String(chatId) === fromId // private chat: the chat id is the user id
+      : TELEGRAM_ALLOWED_USER_IDS.has(fromId);
+    if (!chatOk || !userOk) {
+      console.warn(`[Security] Telegram user ${fromId} is not allowed to control calls`);
+      telegramBot.answerCallbackQuery(query.id, { text: 'Not allowed', show_alert: true }).catch(() => {});
+      return;
+    }
 
     if (action === 'call_answer') {
       console.log('[Telegram] User tapped ANSWER');
       sendToPhone({ action: 'ANSWER' });
-      await telegramBot.editMessageText(`🟢 <b>Call Answered</b>: ${activeCallInfo?.name || activeCallInfo?.number || ''}`, {
+      await telegramBot.editMessageText(`🟢 <b>Call Answered</b>: ${escapeHtml(activeCallInfo?.name || activeCallInfo?.number || '')}`, {
         chat_id: chatId,
         message_id: messageId,
         parse_mode: 'HTML'
@@ -191,7 +329,7 @@ if (isConfigured(process.env.TELEGRAM_BOT_TOKEN)) {
     } else if (action === 'call_reject') {
       console.log('[Telegram] User tapped REJECT');
       sendToPhone({ action: 'REJECT' });
-      await telegramBot.editMessageText(`❌ <b>Call Rejected</b>: ${activeCallInfo?.name || activeCallInfo?.number || ''}`, {
+      await telegramBot.editMessageText(`❌ <b>Call Rejected</b>: ${escapeHtml(activeCallInfo?.name || activeCallInfo?.number || '')}`, {
         chat_id: chatId,
         message_id: messageId,
         parse_mode: 'HTML'
@@ -199,7 +337,7 @@ if (isConfigured(process.env.TELEGRAM_BOT_TOKEN)) {
       activeCallInfo = null;
     }
 
-    telegramBot.answerCallbackQuery(query.id);
+    telegramBot.answerCallbackQuery(query.id).catch(() => {});
   });
 }
 
@@ -244,7 +382,7 @@ async function handlePhoneCallEvent(payload) {
 
     // Telegram Alert
     if (telegramBot && process.env.TELEGRAM_CHAT_ID) {
-      const text = `📞 <b>INCOMING CALL:</b> <code>${displayName}</code>\nStatus: <i>Ringing...</i>`;
+      const text = `📞 <b>INCOMING CALL:</b> <code>${escapeHtml(displayName)}</code>\nStatus: <i>Ringing...</i>`;
       const options = {
         parse_mode: 'HTML',
         reply_markup: {
@@ -281,7 +419,7 @@ async function handlePhoneCallEvent(payload) {
     }
 
     if (telegramBot && activeCallInfo?.telegramMessageId && process.env.TELEGRAM_CHAT_ID) {
-      telegramBot.editMessageText(`🔴 <b>Missed Call:</b> <code>${displayName}</code>`, {
+      telegramBot.editMessageText(`🔴 <b>Missed Call:</b> <code>${escapeHtml(displayName)}</code>`, {
         chat_id: process.env.TELEGRAM_CHAT_ID,
         message_id: activeCallInfo.telegramMessageId,
         parse_mode: 'HTML'
@@ -291,6 +429,6 @@ async function handlePhoneCallEvent(payload) {
     activeCallInfo = null;
 
   } else if (eventType === 'ANSWERED') {
-    console.log(`[Call] Call answered: ${displayName}`);
+    console.log(`[Call] Call answered: ${maskNumber(number)}`);
   }
 }
