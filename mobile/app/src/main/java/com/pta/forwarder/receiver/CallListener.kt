@@ -131,7 +131,7 @@ class CallListener(
                 isMissed = true
                 lastIncomingNumber = number
                 val contactName = resolveContactName(number)
-                Log.d(TAG, "Incoming call ringing from: $number ($contactName)")
+                Log.d(TAG, "Incoming call ringing")
                 dispatcher.dispatchCall(number, contactName, CallEventType.RINGING, timestamp)
                 onCallState?.invoke(CallEventType.RINGING, number, contactName, timestamp)
             }
@@ -150,7 +150,7 @@ class CallListener(
                 // If it was ringing and never answered (offhook), it is a missed call
                 if (previousState == TelephonyManager.CALL_STATE_RINGING && isMissed) {
                     val contactName = resolveContactName(number)
-                    Log.d(TAG, "Missed call from: $number")
+                    Log.d(TAG, "Missed call")
                     dispatcher.dispatchCall(number, contactName, CallEventType.MISSED, timestamp)
                     onCallState?.invoke(CallEventType.MISSED, number, contactName, timestamp)
                 }

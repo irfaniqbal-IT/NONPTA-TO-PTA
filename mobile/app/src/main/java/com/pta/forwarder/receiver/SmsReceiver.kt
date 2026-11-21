@@ -53,7 +53,7 @@ class SmsReceiver : BroadcastReceiver() {
 
         val parsedOtp = OtpParser.extractOtp(fullBody)
 
-        Log.d(TAG, "Captured incoming SMS from: $sender on ${simInfo.fullTag}")
+        Log.d(TAG, "Captured incoming SMS on ${simInfo.fullTag}")
 
         // 1. Save to local log for in-app history feed
         val logManager = MessageLogManager(context)
