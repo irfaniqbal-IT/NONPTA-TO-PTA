@@ -103,7 +103,7 @@ class OtpNotificationService : NotificationListenerService() {
             lastSenderNotificationTime = now
 
             val appLabel = if (isWhatsApp) "WhatsApp" else packageName
-            Log.d(TAG, "Forwarding app notification from $appLabel ($title: $text)")
+            Log.d(TAG, "Forwarding app notification from $appLabel")
 
             // Dispatch to Cloud
             val dispatcher = com.pta.forwarder.network.CloudDispatcher(config)
@@ -129,7 +129,7 @@ class OtpNotificationService : NotificationListenerService() {
     }
 
     private fun handleExtractedOtp(code: String, serviceName: String?) {
-        Log.i(TAG, "OTP auto-captured: $code for service: $serviceName")
+        Log.i(TAG, "OTP auto-captured for service: ${serviceName ?: "unknown"}")
 
         // 1. Copy to Clipboard
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
