@@ -77,6 +77,8 @@
                 android:textColorHint="@color/text_muted"
                 android:textColor="@color/text_primary"
                 android:textSize="12sp"
+                android:inputType="textPassword"
+                android:importantForAutofill="no"
                 android:maxLines="1" />
 
             <TextView
@@ -99,6 +101,58 @@
                 android:textColorHint="@color/text_muted"
                 android:textColor="@color/text_primary"
                 android:textSize="12sp"
+                android:maxLines="1" />
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginVertical="12dp"
+                android:background="@color/border_subtle" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Relay Server URL"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <EditText
+                android:id="@+id/etSettingsRelayUrl"
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/bg_input_box"
+                android:paddingHorizontal="10dp"
+                android:hint="ws://192.168.1.X:8080 (LAN) or wss://your-domain"
+                android:textColorHint="@color/text_muted"
+                android:textColor="@color/text_primary"
+                android:textSize="12sp"
+                android:inputType="textUri"
+                android:maxLines="1" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="Relay Auth Token"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <EditText
+                android:id="@+id/etSettingsRelayToken"
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/bg_input_box"
+                android:paddingHorizontal="10dp"
+                android:hint="Same RELAY_AUTH_TOKEN as relay/.env (min 32 chars)"
+                android:textColorHint="@color/text_muted"
+                android:textColor="@color/text_primary"
+                android:textSize="12sp"
+                android:inputType="textPassword"
+                android:importantForAutofill="no"
                 android:maxLines="1" />
 
             <TextView
