@@ -13,6 +13,7 @@ import androidx.fragment.app.Fragment
 import com.pta.forwarder.OnboardingActivity
 import com.pta.forwarder.data.AppConfig
 import com.pta.forwarder.databinding.FragmentSettingsBinding
+import com.pta.forwarder.network.RelayClient
 
 class SettingsFragment : Fragment() {
 
@@ -42,14 +43,28 @@ class SettingsFragment : Fragment() {
         binding.etSettingsDiscordWebhook.setText(config.discordWebhookUrl)
         binding.etSettingsTelegramToken.setText(config.telegramBotToken)
         binding.etSettingsTelegramChatId.setText(config.telegramChatId)
+        binding.etSettingsRelayUrl.setText(config.relayWsUrl)
+        binding.etSettingsRelayToken.setText(config.relayAuthToken)
     }
 
     private fun setupListeners() {
         binding.btnSettingsSaveChannels.setOnClickListener {
+            val relayUrl = binding.etSettingsRelayUrl.text.toString().trim()
+            val relayToken = binding.etSettingsRelayToken.text.toString().trim()
+            if (relayUrl.isNotEmpty()) {
+                val error = RelayClient.validateRelayUrl(relayUrl) ?: RelayClient.validateToken(relayToken)
+                if (error != null) {
+                    Toast.makeText(requireContext(), error, Toast.LENGTH_LONG).show()
+                    return@setOnClickListener
+                }
+            }
+            config.relayWsUrl = relayUrl
+            config.relayAuthToken = relayToken
+
             config.discordWebhookUrl = binding.etSettingsDiscordWebhook.text.toString().trim()
             config.telegramBotToken = binding.etSettingsTelegramToken.text.toString().trim()
             config.telegramChatId = binding.etSettingsTelegramChatId.text.toString().trim()
-            Toast.makeText(requireContext(), "Delivery settings saved", Toast.LENGTH_SHORT).show()
+            Toast.makeText(requireContext(), "Settings saved. Restart the service to apply relay changes.", Toast.LENGTH_SHORT).show()
         }
 
         binding.btnSettingsOpenAppInfo.setOnClickListener {
