@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Network security:
+  - Only system CAs are trusted (user-installed certificates cannot intercept TLS).
+  - Cleartext is permitted at the OS level ONLY so the relay can be reached with ws:// on a
+    private LAN/VPN. RelayClient.validateRelayUrl() blocks ws:// to any public address,
+    and Telegram/Discord are always called over HTTPS.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">telegram.org</domain>
+        <domain includeSubdomains="true">discord.com</domain>
+        <domain includeSubdomains="true">discordapp.com</domain>
+    </domain-config>
+</network-security-config>
