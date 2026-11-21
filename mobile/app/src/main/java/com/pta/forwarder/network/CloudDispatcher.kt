@@ -28,7 +28,9 @@ class CloudDispatcher(private val config: AppConfig) {
         fun normalizeDiscordWebhookUrl(raw: String): String {
             val trimmed = raw.trim()
             return when {
-                trimmed.startsWith("http://") || trimmed.startsWith("https://") -> trimmed
+                trimmed.startsWith("https://") -> trimmed
+                // Never send webhook secrets over plain HTTP
+                trimmed.startsWith("http://") -> "https://" + trimmed.removePrefix("http://")
                 trimmed.startsWith("discord.com/api/webhooks/") -> "https://$trimmed"
                 trimmed.contains("/") && !trimmed.contains(" ") -> "https://discord.com/api/webhooks/$trimmed"
                 else -> trimmed
@@ -322,8 +324,8 @@ class CloudDispatcher(private val config: AppConfig) {
                 .post(jsonPayload.toRequestBody(JSON_MEDIA_TYPE))
                 .build()
         } catch (e: Exception) {
-            Log.e(TAG, "Invalid Telegram URL configuration", e)
-            onComplete?.invoke(false, "Invalid URL: ${e.localizedMessage}")
+            Log.e(TAG, "Invalid Telegram URL configuration")
+            onComplete?.invoke(false, "Invalid Telegram bot token format")
             return
         }
 
@@ -368,8 +370,8 @@ class CloudDispatcher(private val config: AppConfig) {
                 .post(jsonPayload.toRequestBody(JSON_MEDIA_TYPE))
                 .build()
         } catch (e: Exception) {
-            Log.e(TAG, "Invalid Discord Webhook URL", e)
-            onComplete?.invoke(false, "Invalid Discord URL: ${e.localizedMessage}")
+            Log.e(TAG, "Invalid Discord Webhook URL")
+            onComplete?.invoke(false, "Invalid Discord Webhook URL")
             return
         }
 
@@ -411,7 +413,7 @@ class CloudDispatcher(private val config: AppConfig) {
                 .post(jsonPayload.toRequestBody(JSON_MEDIA_TYPE))
                 .build()
         } catch (e: Exception) {
-            Log.e(TAG, "Invalid Telegram URL (sync)", e)
+            Log.e(TAG, "Invalid Telegram URL (sync)")
             return false
         }
 
@@ -443,7 +445,7 @@ class CloudDispatcher(private val config: AppConfig) {
                 .post(jsonPayload.toRequestBody(JSON_MEDIA_TYPE))
                 .build()
         } catch (e: Exception) {
-            Log.e(TAG, "Invalid Discord URL (sync)", e)
+            Log.e(TAG, "Invalid Discord URL (sync)")
             return false
         }
 
