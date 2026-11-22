@@ -6,17 +6,21 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.SystemClock
+import android.telephony.TelephonyManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.pta.forwarder.MainActivity
 import com.pta.forwarder.PtaApplication
 import com.pta.forwarder.R
 import com.pta.forwarder.data.AppConfig
 import com.pta.forwarder.receiver.CallListener
+import com.pta.forwarder.receiver.CallStateReceiver
 
 class ForwarderService : Service() {
 
@@ -40,6 +44,7 @@ class ForwarderService : Service() {
     }
 
     private var callListener: CallListener? = null
+    private var callStateReceiver: CallStateReceiver? = null
     private var relayClient: com.pta.forwarder.network.RelayClient? = null
 
     override fun onCreate() {
@@ -77,6 +82,21 @@ class ForwarderService : Service() {
             ).apply {
                 connect()
             }
+        }
+
+        // Capture the caller number from the PHONE_STATE broadcast.
+        // Registered dynamically as well as in the manifest, because some OEM builds
+        // throttle manifest-declared receivers while the screen is off.
+        if (callStateReceiver == null) {
+            val receiver = CallStateReceiver()
+            ContextCompat.registerReceiver(
+                this,
+                receiver,
+                IntentFilter(TelephonyManager.ACTION_PHONE_STATE_CHANGED),
+                ContextCompat.RECEIVER_NOT_EXPORTED
+            )
+            callStateReceiver = receiver
+            Log.d(TAG, "CallStateReceiver registered")
         }
 
         // Initialize Call Listener with Relay event forwarding
@@ -129,6 +149,15 @@ class ForwarderService : Service() {
 
         callListener?.stopListening()
         callListener = null
+
+        callStateReceiver?.let {
+            try {
+                unregisterReceiver(it)
+            } catch (e: IllegalArgumentException) {
+                Log.w(TAG, "CallStateReceiver was not registered")
+            }
+        }
+        callStateReceiver = null
 
         relayClient?.disconnect()
         relayClient = null
