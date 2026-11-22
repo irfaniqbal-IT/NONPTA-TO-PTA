@@ -76,7 +76,10 @@ class OnboardingActivity : AppCompatActivity() {
         binding.btnGrantPhone.setOnClickListener {
             val perms = mutableListOf(
                 Manifest.permission.READ_PHONE_STATE,
-                Manifest.permission.READ_CALL_LOG
+                // Required for the caller number to appear in the PHONE_STATE broadcast
+                Manifest.permission.READ_CALL_LOG,
+                // Required to show the saved contact name instead of the raw number
+                Manifest.permission.READ_CONTACTS
             )
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 perms.add(Manifest.permission.READ_PHONE_NUMBERS)
@@ -195,7 +198,10 @@ class OnboardingActivity : AppCompatActivity() {
         binding.btnGrantSms.isEnabled = !smsGranted
         binding.btnGrantSms.alpha = if (smsGranted) 0.6f else 1.0f
 
-        val phoneGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED
+        val phoneGranted =
+            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
         binding.btnGrantPhone.text = if (phoneGranted) "Granted" else "Grant"
         binding.btnGrantPhone.isEnabled = !phoneGranted
         binding.btnGrantPhone.alpha = if (phoneGranted) 0.6f else 1.0f
